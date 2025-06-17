@@ -1173,7 +1173,7 @@ def main():
                     dbx.files_delete_v2(file.path_display)
                     logger.info(f"🗑️ Deleted from Dropbox: {file.name}")
                 except Exception as e:
-                    logger.error(f"❌ Failed to delete from Dropbox: {e}")
+                    logger.error(f"❌ Failed to delete from Dropbox: {file.name} — {e}")
             
         except Exception as e:
             logger.error(f"❌ Failed to process {file.name}: {e}")
