@@ -1,7 +1,7 @@
 name: Reddit - InkWisps
 
 on:
-  reddit:
+  schedule:
     # ~15 runs/day spaced 96 minutes apart (UTC times)
     - cron: '30 19 * * *'  # 01:00 AM IST
     - cron: '0 21 * * *'   # 02:30 AM IST
