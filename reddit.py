@@ -713,8 +713,8 @@ def safe_submit_video(subreddit, title, video_path):
             return None
             
         # Poll for media readiness
-        MAX_RETRIES = 10
-        RETRY_DELAY = 5
+        MAX_RETRIES = 15
+        RETRY_DELAY = 10
         
         logger.info("⏳ Waiting for media to be ready...")
         for attempt in range(MAX_RETRIES):
