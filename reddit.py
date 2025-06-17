@@ -20,6 +20,11 @@ import websocket
 import threading
 import io
 import re
+from pytz import timezone
+from datetime import datetime
+
+IST = timezone('Asia/Kolkata')
+current_time = datetime.now(IST)
 
 # === LOGGING SETUP ===
 logging.basicConfig(
