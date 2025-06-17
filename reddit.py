@@ -41,7 +41,7 @@ DROPBOX_FOLDER_PATH = os.getenv('DROPBOX_FOLDER_PATH', '/reddit_inkwisps')
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
 REDDIT_REFRESH_TOKEN = os.getenv('REDDIT_REFRESH_TOKEN')
-REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT', 'myapp by u/you')
+REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT', 'script v1.0 by u/arulraj_r')
 SUBREDDIT_NAME = os.getenv('SUBREDDIT_NAME', 'inkwisp')
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
