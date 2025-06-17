@@ -1040,23 +1040,13 @@ def send_dropbox_report(report, is_final=False):
         message += f"📁 Total files: {report['total_files']}\n"
         message += f"🎥 Video files: {report['video_files']}\n"
         message += f"🖼️ Image files: {report['image_files']}\n"
-        message += f"📄 Other files: {report['other_files']}\n\n"
+        message += f"📄 Other files: {report['other_files']}\n"
         
-        # Add file lists
-        if report['file_list']['videos']:
-            message += "🎥 Videos:\n"
-            for video in report['file_list']['videos']:
-                message += f"- {video}\n"
-        
-        if report['file_list']['images']:
-            message += "\n🖼️ Images:\n"
-            for image in report['file_list']['images']:
-                message += f"- {image}\n"
-        
-        if report['file_list']['others']:
-            message += "\n📄 Other files:\n"
-            for other in report['file_list']['others']:
-                message += f"- {other}\n"
+        # File counts only (no names)
+        message += f"\n🔢 Breakdown:\n"
+        message += f"🎥 Videos: {len(report['file_list']['videos'])}\n"
+        message += f"🖼️ Images: {len(report['file_list']['images'])}\n"
+        message += f"📄 Others: {len(report['file_list']['others'])}"
         
         send_telegram_notification(message)
     except Exception as e:
