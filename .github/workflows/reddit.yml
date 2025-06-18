@@ -46,8 +46,11 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt update
+          sudo apt install -y ffmpeg  # 🔧 Required for ffprobe and ffmpeg calls
           pip install --upgrade pip
           pip install praw dropbox requests python-telegram-bot moviepy opencv-python ffmpeg-python pytz
+
 
 
       - name: Run Reddit Bot
