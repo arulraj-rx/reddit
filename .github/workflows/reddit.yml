@@ -46,13 +46,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-         pip install --upgrade pip
-          pip install praw dropbox requests python-telegram-bot moviepy opencv-python ffmpeg-python pytz
+        sudo add-apt-repository ppa:jonathonf/ffmpeg-4 -y
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
-      - name: Verify ffmpeg (optional debug)
+      - name: Install Python dependencies
         run: |
-          which ffmpeg
-          ffmpeg -version
+          pip install --upgrade pip
+          pip install praw dropbox requests python-telegram-bot moviepy opencv-python ffmpeg-python pytz
 
       - name: Run Reddit Bot
         run: python "reddit.py"
