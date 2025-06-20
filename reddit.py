@@ -1005,18 +1005,19 @@ def upload_image_to_reddit(image_url, title):
 def get_dropbox_report():
     """Get report of files in Dropbox folder"""
     try:
-        # Initialize Dropbox client
         dbx = get_dropbox_client()
-        # Get all files
         result = dbx.files_list_folder(DROPBOX_FOLDER_PATH)
         all_files = result.entries
-        
-        # Count files by type
+
+        while result.has_more:
+            result = dbx.files_list_folder_continue(result.cursor)
+            all_files.extend(result.entries)
+
         video_files = [f for f in all_files if f.name.lower().endswith(('.mp4', '.mov'))]
         image_files = [f for f in all_files if f.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif'))]
         other_files = [f for f in all_files if f not in video_files and f not in image_files]
-        
-        report = {
+
+        return {
             'total_files': len(all_files),
             'video_files': len(video_files),
             'image_files': len(image_files),
@@ -1027,7 +1028,7 @@ def get_dropbox_report():
                 'others': [f.name for f in other_files]
             }
         }
-        return report
+
     except Exception as e:
         logger.error(f"❌ Failed to get Dropbox report: {e}")
         return None
@@ -1093,18 +1094,23 @@ def generate_post_title(filename: str) -> str:
 def list_dropbox_files():
     """Get all eligible media files from Dropbox folder"""
     try:
-        dbx = get_dropbox_client()  # Get fresh client
+        dbx = get_dropbox_client()
+        all_files = []
+
         result = dbx.files_list_folder(DROPBOX_FOLDER_PATH)
-        if not result or not hasattr(result, 'entries'):
-            return []
-        
-        # Filter for supported media files
+        all_files.extend(result.entries)
+
+        while result.has_more:
+            result = dbx.files_list_folder_continue(result.cursor)
+            all_files.extend(result.entries)
+
         supported_extensions = ('.mp4', '.mov', '.jpg', '.jpeg', '.png', '.gif')
-        return [f for f in result.entries if f.name.lower().endswith(supported_extensions)]
+        return [f for f in all_files if f.name.lower().endswith(supported_extensions)]
+
     except Exception as e:
         logger.error(f"Dropbox list error: {e}")
         return []
-
+        
 def get_subreddit_posts(subreddit, limit=10):
     # Get a fresh access token
     token = get_reddit_token()
