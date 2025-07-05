@@ -22,6 +22,7 @@ import io
 import re
 from pytz import timezone
 from datetime import datetime
+import random
 
 IST = timezone('Asia/Kolkata')
 current_time = datetime.now(IST)
@@ -1149,7 +1150,7 @@ def main():
             return
         
         # Process only the first file
-        file = files[0]
+        file = random.choice(files)
         try:
             # Get temporary link
             temp_link = get_dropbox_temporary_link(file.path_display)
