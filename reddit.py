@@ -55,7 +55,6 @@ SUBREDDITS_TO_POST = [
     'memes',
     'ContagiousLaughter',
     'MemeVideos',
-    'ExplainTheJoke',
     'Funnymemes',
     'humor',
     'shitposting',
@@ -1298,7 +1297,7 @@ def get_subreddit_posts(subreddit, limit=10):
         return None
 
 def main():
-    """Main function to process one video from Dropbox"""
+    """Main function to process files from Dropbox"""
     try:
         # Get initial Dropbox report
         initial_report = get_dropbox_report()
@@ -1318,45 +1317,193 @@ def main():
             send_telegram_notification("📭 No files found in Dropbox folder")
             return
         
-        # Process only the first file
-        file = random.choice(files)
-        try:
-            # Get temporary link
-            temp_link = get_dropbox_temporary_link(file.path_display)
-            if not temp_link:
-                return
-            
-            # Generate title from filename
-            title = generate_post_title(file.name)
-            logger.info(f"📝 Final title for Reddit: {title}")
-            
-            # Determine file type and upload to multiple subreddits
-            if file.name.lower().endswith(('.mp4', '.mov')):
-                urls = upload_to_multiple_subreddits(temp_link, title, is_video=True)
-            elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                urls = upload_to_multiple_subreddits(temp_link, title, is_video=False)
-            else:
-                logger.warning(f"⚠️ Unsupported file type: {file.name}")
-                return
-            
-            if urls:
-                # Send summary notification
-                summary = f"✅ Successfully uploaded to {len(urls)} subreddits:\n"
-                for i, url in enumerate(urls, 1):
-                    summary += f"{i}. {url}\n"
-                send_telegram_notification(summary)
+        # Step 1: Check subreddit count and determine files to process
+        subreddit_count = len(SUBREDDITS_TO_POST)
+        files_to_process = min(len(files), subreddit_count)
+        
+        logger.info(f"📊 Step 1: Found {subreddit_count} subreddits available")
+        logger.info(f"📊 Will process {files_to_process} files from Dropbox")
+        send_telegram_notification(f"📊 Step 1: Found {subreddit_count} subreddits, will process {files_to_process} files")
+        
+        # Select files to process (first N files based on subreddit count)
+        files_to_process_list = files[:files_to_process]
+        
+        # Step 2: Post selected files to main subreddit first
+        logger.info("🚀 Step 2: Posting selected files to main subreddit...")
+        send_telegram_notification("🚀 Step 2: Posting selected files to main subreddit...")
+        
+        main_subreddit_urls = []
+        for i, file in enumerate(files_to_process_list):
+            try:
+                logger.info(f"📝 Posting file {i+1}/{len(files_to_process_list)} to main subreddit: {file.name}")
                 
-                # Delete from Dropbox
-                try:
-                    dbx = get_dropbox_client()
-                    dbx.files_delete_v2(file.path_display)
-                    logger.info(f"🗑️ Deleted from Dropbox: {file.name}")
-                except Exception as e:
-                    logger.error(f"❌ Failed to delete from Dropbox: {file.name} — {e}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to process {file.name}: {e}")
-            return
+                # Get temporary link
+                temp_link = get_dropbox_temporary_link(file.path_display)
+                if not temp_link:
+                    continue
+                
+                # Generate title from filename
+                title = generate_post_title(file.name)
+                logger.info(f"📝 Final title for main subreddit: {title}")
+                
+                # Determine file type and upload to main subreddit
+                if file.name.lower().endswith(('.mp4', '.mov')):
+                    url = upload_to_reddit(temp_link, title)
+                elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    url = upload_image_to_reddit(temp_link, title)
+                else:
+                    logger.warning(f"⚠️ Unsupported file type: {file.name}")
+                    continue
+                
+                if url:
+                    main_subreddit_urls.append(url)
+                    logger.info(f"✅ Posted to main subreddit: {url}")
+                    send_telegram_notification(f"✅ Posted to main subreddit: {url}")
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to post {file.name} to main subreddit: {e}")
+                continue
+        
+        # Step 3: Post individual files to different subreddits (only after main subreddit is done)
+        logger.info("🚀 Step 3: Posting individual files to different subreddits...")
+        send_telegram_notification("🚀 Step 3: Posting individual files to different subreddits...")
+        
+        posted_files = []
+        for i in range(files_to_process):
+            try:
+                file = files_to_process_list[i]
+                subreddit_name = SUBREDDITS_TO_POST[i]
+                
+                logger.info(f"📝 Posting file {i+1}/{files_to_post} to r/{subreddit_name}: {file.name}")
+                
+                # Get temporary link
+                temp_link = get_dropbox_temporary_link(file.path_display)
+                if not temp_link:
+                    continue
+                
+                # Generate title from filename
+                title = generate_post_title(file.name)
+                logger.info(f"📝 Final title for r/{subreddit_name}: {title}")
+                
+                # Initialize PRAW client
+                reddit = Reddit(
+                    client_id=REDDIT_CLIENT_ID,
+                    client_secret=REDDIT_CLIENT_SECRET,
+                    refresh_token=REDDIT_REFRESH_TOKEN,
+                    user_agent=REDDIT_USER_AGENT
+                )
+                
+                # Get subreddit
+                subreddit = reddit.subreddit(subreddit_name)
+                
+                # Determine file type and upload
+                if file.name.lower().endswith(('.mp4', '.mov')):
+                    # Handle video upload
+                    video_data = download_to_memory(temp_link)
+                    if not video_data:
+                        continue
+                    
+                    processed_video = validate_and_convert_video(video_data)
+                    if not processed_video:
+                        continue
+                    
+                    thumbnail_data = generate_thumbnail(processed_video)
+                    if not thumbnail_data:
+                        continue
+                    
+                    # Create temporary files
+                    fd, temp_video = tempfile.mkstemp(suffix=".mp4")
+                    os.close(fd)
+                    
+                    fd, temp_thumbnail = tempfile.mkstemp(suffix=".jpg")
+                    os.close(fd)
+                    
+                    with open(temp_video, 'wb') as f:
+                        f.write(processed_video.getvalue())
+                    
+                    with open(temp_thumbnail, 'wb') as f:
+                        f.write(thumbnail_data.getvalue())
+                    
+                    # Submit video
+                    submission = subreddit.submit_video(
+                        title=title,
+                        video_path=temp_video,
+                        thumbnail_path=temp_thumbnail,
+                        without_websockets=True,
+                        resubmit=True,
+                        send_replies=True
+                    )
+                    
+                    # Clean up temporary files
+                    os.remove(temp_video)
+                    os.remove(temp_thumbnail)
+                    
+                elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                    # Handle image upload
+                    image_data = download_to_memory(temp_link)
+                    if not image_data:
+                        continue
+                    
+                    # Create temporary file
+                    fd, temp_image = tempfile.mkstemp(suffix=".jpg")
+                    os.close(fd)
+                    
+                    with open(temp_image, 'wb') as f:
+                        f.write(image_data.getvalue())
+                    
+                    # Submit image
+                    submission = subreddit.submit_image(
+                        title=title,
+                        image_path=temp_image,
+                        send_replies=True
+                    )
+                    
+                    # Clean up temporary file
+                    os.remove(temp_image)
+                else:
+                    logger.warning(f"⚠️ Unsupported file type: {file.name}")
+                    continue
+                
+                # Wait for processing
+                time.sleep(10)
+                
+                # Try to find the submission if not returned directly
+                if not submission:
+                    submission = find_submission(reddit, title)
+                    if not submission:
+                        logger.warning(f"⚠️ Could not find submission in r/{subreddit_name}")
+                        continue
+                
+                # Get post URL
+                post_url = f"https://reddit.com{submission.permalink}"
+                posted_files.append(file)
+                
+                logger.info(f"✅ Successfully posted to r/{subreddit_name}: {post_url}")
+                send_telegram_notification(f"✅ Posted to r/{subreddit_name}: {post_url}")
+                
+                # Sleep for 30 seconds before next post (except for the last one)
+                if i < files_to_post - 1:
+                    logger.info(f"⏳ Sleeping for 30 seconds before next post...")
+                    time.sleep(30)
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to post {file.name} to r/{subreddit_name}: {e}")
+                send_telegram_notification(f"❌ Failed to post {file.name} to r/{subreddit_name}: {e}")
+                continue
+        
+        # Step 3: Delete successfully posted files from Dropbox
+        logger.info("🚀 Step 3: Deleting posted files from Dropbox...")
+        send_telegram_notification("🚀 Step 3: Deleting posted files from Dropbox...")
+        
+        deleted_count = 0
+        for file in posted_files:
+            try:
+                dbx = get_dropbox_client()
+                dbx.files_delete_v2(file.path_display)
+                logger.info(f"🗑️ Deleted from Dropbox: {file.name}")
+                deleted_count += 1
+            except Exception as e:
+                logger.error(f"❌ Failed to delete from Dropbox: {file.name} — {e}")
         
         # Get final Dropbox report
         final_report = get_dropbox_report()
@@ -1385,17 +1532,23 @@ def main():
                 summary += f"✅ Videos processed: {processed['videos']}\n"
                 summary += f"✅ Images processed: {processed['images']}\n"
                 summary += f"✅ Other files processed: {processed['others']}\n"
+                summary += f"✅ Files deleted from Dropbox: {deleted_count}\n"
+                summary += f"✅ Main subreddit posts: {len(main_subreddit_urls)}\n"
+                summary += f"✅ Individual subreddit posts: {len(posted_files)}"
                 send_telegram_notification(summary)
                 
                 logger.info("📊 Processing Summary:")
                 logger.info(f"✅ Total files processed: {processed['total']}")
                 logger.info(f"✅ Videos processed: {processed['videos']}")
                 logger.info(f"✅ Images processed: {processed['images']}")
-                logger.info(f"✅ Other files processed: {processed['others']}\n")
+                logger.info(f"✅ Other files processed: {processed['others']}")
+                logger.info(f"✅ Files deleted from Dropbox: {deleted_count}")
+                logger.info(f"✅ Main subreddit posts: {len(main_subreddit_urls)}")
+                logger.info(f"✅ Individual subreddit posts: {len(posted_files)}\n")
         
-        # Exit after processing one file
-        logger.info("✅ Script completed processing one file")
-        send_telegram_notification("✅ Script completed processing one file")
+        # Exit after processing all files
+        logger.info("✅ Script completed processing all files")
+        send_telegram_notification("✅ Script completed processing all files")
         return
     
     except Exception as e:
