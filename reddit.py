@@ -1,4 +1,4 @@
-# test_dropbox_to_reddit.py
+# reddit.py
 
 import os
 import logging
@@ -42,17 +42,33 @@ logger = logging.getLogger("RedditUploader")
 DROPBOX_APP_KEY = os.getenv('DROPBOX_APP_KEY')
 DROPBOX_APP_SECRET = os.getenv('DROPBOX_APP_SECRET')
 DROPBOX_REFRESH_TOKEN = os.getenv('DROPBOX_REFRESH_TOKEN')
-DROPBOX_FOLDER_PATH = os.getenv('DROPBOX_FOLDER_PATH', '/reddit_inkwisps')
+DROPBOX_FOLDER_PATH = os.getenv('DROPBOX_FOLDER_PATH', '/REDDIT_MUL')
 
 REDDIT_CLIENT_ID = os.getenv('REDDIT_CLIENT_ID')
 REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
 REDDIT_REFRESH_TOKEN = os.getenv('REDDIT_REFRESH_TOKEN')
 REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT', 'script v1.0 by u/arulraj_r')
-SUBREDDIT_NAME = os.getenv('SUBREDDIT_NAME', 'inkwisp')
+SUBREDDIT_NAME = os.getenv('SUBREDDIT_NAME', 'reddit_inkwisps')
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
+# Target subreddits for crossposting
+TARGET_SUBREDDITS = [
+    'memes',
+    'me_irl', 
+    'meirl',
+    'ContagiousLaughter',
+    'MemeVideos',
+    'ExplainTheJoke',
+    'Funnymemes',
+    'humor',
+    'shitposting',
+    'funny',
+    'Wellthatsucks',
+    'maybemaybemaybe'
+    
+]
 
 # Validate required credentials
 required_credentials = {
@@ -1003,6 +1019,88 @@ def upload_image_to_reddit(image_url, title):
             except Exception as e:
                 logger.warning(f"Failed to clean up temporary image: {e}")
 
+def crosspost_to_subreddits(reddit, original_submission, target_subs, custom_title=None):
+    """Crosspost to multiple subreddits"""
+    try:
+        logger.info("🔄 Starting crossposting process...")
+        
+        # Get the submission object if we have a URL
+        if isinstance(original_submission, str):
+            # Extract submission ID from URL
+            if '/comments/' in original_submission:
+                submission_id = original_submission.split('/comments/')[1].split('/')[0]
+            else:
+                # Try to get from user's recent submissions
+                for post in reddit.user.me().submissions.new(limit=5):
+                    if post.url == original_submission or f"https://reddit.com{post.permalink}" == original_submission:
+                        submission_id = post.id
+                        break
+                else:
+                    raise Exception("Could not find submission ID from URL")
+        else:
+            submission_id = original_submission.id
+        
+        # Get the submission object
+        submission = reddit.submission(id=submission_id)
+        
+        # Use custom title or original title
+        title = custom_title or submission.title
+        
+        # Add x-post prefix if not already present
+        if not title.lower().startswith('x-post') and not title.lower().startswith('crosspost'):
+            title = f"x-post: {title}"
+        
+        successful_crossposts = []
+        failed_crossposts = []
+        
+        for sub in target_subs:
+            try:
+                logger.info(f"📤 Crossposting to r/{sub}...")
+                
+                # Crosspost to target subreddit
+                crosspost = submission.crosspost(subreddit=sub, title=title)
+                
+                # Wait a bit between crossposts to avoid rate limiting
+                time.sleep(6)
+                
+                successful_crossposts.append(sub)
+                logger.info(f"✅ Successfully crossposted to r/{sub}")
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f"❌ Failed to crosspost to r/{sub}: {error_msg}")
+                failed_crossposts.append((sub, error_msg))
+                
+                # Continue with other subreddits even if one fails
+                continue
+        
+        # Log summary
+        logger.info(f"📊 Crossposting Summary:")
+        logger.info(f"✅ Successful: {len(successful_crossposts)} subreddits")
+        logger.info(f"❌ Failed: {len(failed_crossposts)} subreddits")
+        
+        if successful_crossposts:
+            logger.info(f"✅ Crossposted to: {', '.join(successful_crossposts)}")
+        
+        if failed_crossposts:
+            logger.info(f"❌ Failed subreddits:")
+            for sub, error in failed_crossposts:
+                logger.info(f"   - r/{sub}: {error}")
+        
+        return {
+            'successful': successful_crossposts,
+            'failed': failed_crossposts,
+            'total_attempted': len(target_subs)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Crossposting process failed: {e}")
+        return {
+            'successful': [],
+            'failed': [(sub, str(e)) for sub in target_subs],
+            'total_attempted': len(target_subs)
+        }
+
 def get_dropbox_report():
     """Get report of files in Dropbox folder"""
     try:
@@ -1173,6 +1271,45 @@ def main():
             if url:
                 # Send notification
                 send_telegram_notification(f"✅ Successfully uploaded to Reddit: {url}")
+                
+                # Initialize Reddit client for crossposting
+                try:
+                    reddit = Reddit(
+                        client_id=REDDIT_CLIENT_ID,
+                        client_secret=REDDIT_CLIENT_SECRET,
+                        refresh_token=REDDIT_REFRESH_TOKEN,
+                        user_agent=REDDIT_USER_AGENT
+                    )
+                    
+                    # Crosspost to target subreddits
+                    logger.info("🔄 Starting crossposting to motivation subreddits...")
+                    crosspost_result = crosspost_to_subreddits(
+                        reddit=reddit,
+                        original_submission=url,
+                        target_subs=TARGET_SUBREDDITS,
+                        custom_title=title
+                    )
+                    
+                    # Send crossposting summary to Telegram
+                    if crosspost_result['successful']:
+                        crosspost_message = f"🔄 Crossposting Summary:\n"
+                        crosspost_message += f"✅ Successful: {len(crosspost_result['successful'])} subreddits\n"
+                        crosspost_message += f"✅ Crossposted to: {', '.join(crosspost_result['successful'])}\n"
+                        
+                        if crosspost_result['failed']:
+                            crosspost_message += f"❌ Failed: {len(crosspost_result['failed'])} subreddits\n"
+                            for sub, error in crosspost_result['failed'][:3]:  # Show first 3 failures
+                                crosspost_message += f"   - r/{sub}: {error[:50]}...\n"
+                        
+                        send_telegram_notification(crosspost_message)
+                        logger.info("✅ Crossposting completed")
+                    else:
+                        send_telegram_notification("❌ Crossposting failed for all subreddits")
+                        logger.error("❌ Crossposting failed")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Crossposting process failed: {e}")
+                    send_telegram_notification(f"❌ Crossposting failed: {str(e)[:100]}...")
                 
                 # Delete from Dropbox
                 try:
