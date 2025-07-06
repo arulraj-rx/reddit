@@ -23,160 +23,9 @@ import re
 from pytz import timezone
 from datetime import datetime
 import random
-try:
-    import cv2
-    import pytesseract
-    from PIL import Image
-    import numpy as np
-    OCR_AVAILABLE = True
-except ImportError as e:
-    OCR_AVAILABLE = False
 
 IST = timezone('Asia/Kolkata')
 current_time = datetime.now(IST)
-
-def extract_text_from_video_frames(video_path, max_frames=5):
-    """Extract text from video frames using OCR"""
-    if not OCR_AVAILABLE:
-        logger.warning("⚠️ OCR libraries not available, skipping text extraction")
-        return None
-        
-    try:
-        logger.info(f"🔍 Extracting text from video frames: {video_path}")
-        
-        # Open video file
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            logger.error("❌ Could not open video file")
-            return None
-        
-        # Get video properties
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        duration = total_frames / fps if fps > 0 else 0
-        
-        logger.info(f"📊 Video info: {total_frames} frames, {fps:.2f} fps, {duration:.2f}s duration")
-        
-        # Calculate frame intervals to sample
-        if total_frames <= max_frames:
-            frame_indices = list(range(total_frames))
-        else:
-            # Sample frames evenly throughout the video
-            frame_indices = [int(i * total_frames / max_frames) for i in range(max_frames)]
-        
-        extracted_texts = []
-        
-        for i, frame_idx in enumerate(frame_indices):
-            try:
-                # Set frame position
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-                ret, frame = cap.read()
-                
-                if not ret:
-                    logger.warning(f"⚠️ Could not read frame {frame_idx}")
-                    continue
-                
-                # Convert BGR to RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Convert to PIL Image
-                pil_image = Image.fromarray(frame_rgb)
-                
-                # Extract text using Tesseract
-                try:
-                    # Try different OCR configurations for better results
-                    text = pytesseract.image_to_string(pil_image, config='--psm 6')
-                    
-                    # Clean up the text
-                    text = text.strip()
-                    if text and len(text) > 3:  # Only keep meaningful text
-                        extracted_texts.append(text)
-                        logger.info(f"📝 Frame {i+1}: Found text: {text[:50]}...")
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ OCR failed on frame {i+1}: {e}")
-                    continue
-                
-            except Exception as e:
-                logger.warning(f"⚠️ Error processing frame {i+1}: {e}")
-                continue
-        
-        cap.release()
-        
-        if not extracted_texts:
-            logger.warning("⚠️ No text extracted from video frames")
-            return None
-        
-        # Combine and clean all extracted text
-        combined_text = ' '.join(extracted_texts)
-        cleaned_text = clean_ocr_text(combined_text)
-        
-        if cleaned_text:
-            logger.info(f"✅ Extracted text: {cleaned_text[:100]}...")
-            return cleaned_text
-        else:
-            logger.warning("⚠️ No cleaned text extracted")
-            return None
-        
-    except Exception as e:
-        logger.error(f"❌ Error extracting text from video: {e}")
-        return None
-
-def clean_ocr_text(text):
-    """Clean and filter OCR extracted text"""
-    try:
-        if not text:
-            return None
-        
-        # Remove extra whitespace and newlines
-        text = re.sub(r'\s+', ' ', text.strip())
-        
-        # Remove common OCR artifacts
-        text = re.sub(r'[^\w\s.,!?\'"()-]', '', text)
-        
-        # Remove very short words (likely noise)
-        words = text.split()
-        filtered_words = [word for word in words if len(word) > 2]
-        
-        # Reconstruct text
-        cleaned_text = ' '.join(filtered_words)
-        
-        # Remove duplicate consecutive words
-        cleaned_text = re.sub(r'\b(\w+)(\s+\1\b)+', r'\1', cleaned_text)
-        
-        # Limit length
-        if len(cleaned_text) > 200:
-            cleaned_text = cleaned_text[:200].rsplit(' ', 1)[0] + '...'
-        
-        return cleaned_text if cleaned_text.strip() else None
-        
-    except Exception as e:
-        logger.error(f"❌ Error cleaning OCR text: {e}")
-        return None
-
-def generate_title_from_ocr(video_path, original_title):
-    """Generate title using OCR text from video frames"""
-    if not OCR_AVAILABLE:
-        logger.warning("⚠️ OCR libraries not available, using original title")
-        return original_title
-        
-    try:
-        # Try to extract text from video frames
-        ocr_text = extract_text_from_video_frames(video_path)
-        
-        if ocr_text and len(ocr_text) > 10:
-            # Use OCR text as title
-            title = ocr_text
-            logger.info(f"📝 Using OCR text as title: {title}")
-            return title
-        else:
-            # Fall back to original title generation
-            logger.info(f"📝 No OCR text found, using original title: {original_title}")
-            return original_title
-            
-    except Exception as e:
-        logger.error(f"❌ Error generating title from OCR: {e}")
-        return original_title
 
 # === LOGGING SETUP ===
 logging.basicConfig(
@@ -200,19 +49,6 @@ REDDIT_CLIENT_SECRET = os.getenv('REDDIT_CLIENT_SECRET')
 REDDIT_REFRESH_TOKEN = os.getenv('REDDIT_REFRESH_TOKEN')
 REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT', 'script v1.0 by u/arulraj_r')
 SUBREDDIT_NAME = os.getenv('SUBREDDIT_NAME', 'inkwisp')
-
-# List of subreddits to post to
-SUBREDDITS_TO_POST = [
-    'memes',
-    'ContagiousLaughter',
-    'MemeVideos',
-    'Funnymemes',
-    'humor',
-    'shitposting',
-    'funny',
-    'Wellthatsucks',
-    'maybemaybemaybe'
-]
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
@@ -1167,161 +1003,6 @@ def upload_image_to_reddit(image_url, title):
             except Exception as e:
                 logger.warning(f"Failed to clean up temporary image: {e}")
 
-def upload_to_multiple_subreddits(video_url, title, is_video=True):
-    """Upload content to multiple subreddits with sleep between each post"""
-    temp_video = None
-    temp_image = None
-    thumbnail_data = None
-    posted_urls = []
-    
-    try:
-        # Initialize PRAW client
-        reddit = Reddit(
-            client_id=REDDIT_CLIENT_ID,
-            client_secret=REDDIT_CLIENT_SECRET,
-            refresh_token=REDDIT_REFRESH_TOKEN,
-            user_agent=REDDIT_USER_AGENT
-        )
-        
-        # Download content once
-        if is_video:
-            video_data = download_to_memory(video_url)
-            if not video_data:
-                raise Exception("Failed to download video")
-            
-            # Validate and convert video if needed
-            processed_video = validate_and_convert_video(video_data)
-            if not processed_video:
-                raise Exception("Video validation/conversion failed")
-            
-            # Generate thumbnail in memory
-            thumbnail_data = generate_thumbnail(processed_video)
-            if not thumbnail_data:
-                raise Exception("Failed to generate thumbnail")
-            
-            # Create temporary files for PRAW upload
-            fd, temp_video = tempfile.mkstemp(suffix=".mp4")
-            os.close(fd)
-            
-            fd, temp_thumbnail = tempfile.mkstemp(suffix=".jpg")
-            os.close(fd)
-            
-            # Write data to temporary files
-            with open(temp_video, 'wb') as f:
-                f.write(processed_video.getvalue())
-            
-            with open(temp_thumbnail, 'wb') as f:
-                f.write(thumbnail_data.getvalue())
-        else:
-            # Handle image
-            image_data = download_to_memory(video_url)
-            if not image_data:
-                raise Exception("Failed to download image")
-            
-            # Handle both memory and disk downloads
-            if isinstance(image_data, io.BytesIO):
-                # Create temporary file for PRAW
-                fd, temp_image = tempfile.mkstemp(suffix=".jpg")
-                os.close(fd)
-                with open(temp_image, 'wb') as f:
-                    f.write(image_data.getvalue())
-            else:
-                # Already downloaded to disk
-                temp_image = image_data
-        
-        # Post to each subreddit with sleep between posts
-        for i, subreddit_name in enumerate(SUBREDDITS_TO_POST):
-            try:
-                logger.info(f"📝 Posting to r/{subreddit_name} ({i+1}/{len(SUBREDDITS_TO_POST)})")
-                
-                # Get subreddit
-                subreddit = reddit.subreddit(subreddit_name)
-                
-                # Submit content
-                if is_video:
-                    submission = subreddit.submit_video(
-                        title=title,
-                        video_path=temp_video,
-                        thumbnail_path=temp_thumbnail,
-                        without_websockets=True,
-                        resubmit=True,
-                        send_replies=True
-                    )
-                else:
-                    submission = subreddit.submit_image(
-                        title=title,
-                        image_path=temp_image,
-                        send_replies=True
-                    )
-                
-                # Wait for initial processing
-                time.sleep(10)
-                
-                # Try to find the submission if not returned directly
-                if not submission:
-                    submission = find_submission(reddit, title)
-                    if not submission:
-                        logger.warning(f"⚠️ Could not find submission in r/{subreddit_name}")
-                        continue
-                
-                # For videos, wait for processing
-                if is_video:
-                    max_retries = 6
-                    retry_delay = 10
-                    
-                    for attempt in range(max_retries):
-                        try:
-                            # Refresh submission data
-                            submission = reddit.submission(id=submission.id)
-                            
-                            # Check if video is ready
-                            if hasattr(submission, 'media') and submission.media and 'reddit_video' in submission.media:
-                                break
-                            
-                            logger.info(f"⏳ Waiting for video processing in r/{subreddit_name} (attempt {attempt + 1}/{max_retries})...")
-                            time.sleep(retry_delay)
-                            
-                        except Exception as e:
-                            logger.warning(f"⚠️ Error checking video status in r/{subreddit_name}: {e}")
-                            time.sleep(retry_delay)
-                
-                # Add to posted URLs
-                post_url = f"https://reddit.com{submission.permalink}"
-                posted_urls.append(post_url)
-                logger.info(f"✅ Successfully posted to r/{subreddit_name}: {post_url}")
-                
-                # Send notification for each successful post
-                send_telegram_notification(f"✅ Posted to r/{subreddit_name}: {post_url}")
-                
-                # Sleep for 30 seconds before next post (except for the last one)
-                if i < len(SUBREDDITS_TO_POST) - 1:
-                    logger.info(f"⏳ Sleeping for 30 seconds before next post...")
-                    time.sleep(30)
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to post to r/{subreddit_name}: {e}")
-                send_telegram_notification(f"❌ Failed to post to r/{subreddit_name}: {e}")
-                continue
-        
-        # Return all posted URLs
-        return posted_urls
-        
-    except Exception as e:
-        logger.error(f"❌ Multiple subreddit upload failed: {e}")
-        raise
-        
-    finally:
-        # Clean up temporary files
-        try:
-            if temp_video and os.path.exists(temp_video):
-                os.remove(temp_video)
-            if temp_thumbnail and os.path.exists(temp_thumbnail):
-                os.remove(temp_thumbnail)
-            if temp_image and os.path.exists(temp_image):
-                os.remove(temp_image)
-        except Exception as e:
-            logger.warning(f"Failed to clean up temporary files: {e}")
-
 def get_dropbox_report():
     """Get report of files in Dropbox folder"""
     try:
@@ -1394,20 +1075,10 @@ def clean_filename(filename):
         logger.error(f"❌ Failed to clean filename: {e}")
         return filename
 
-def generate_post_title(filename: str, video_path: str = None) -> str:
-    """Generate post title from filename or OCR text from video"""
+def generate_post_title(filename: str) -> str:
+    """Generate post title from filename"""
     try:
-        # If it's a video and we have a path, try OCR first
-        if video_path and filename.lower().endswith(('.mp4', '.mov')):
-            try:
-                ocr_title = generate_title_from_ocr(video_path, None)
-                if ocr_title:
-                    logger.info(f"📝 Using OCR-generated title: {ocr_title}")
-                    return ocr_title
-            except Exception as e:
-                logger.warning(f"⚠️ OCR title generation failed: {e}")
-        
-        # Fall back to filename-based title
+        # Clean the filename first
         clean_name = clean_filename(filename)
         # Remove file extension
         name_without_ext = os.path.splitext(clean_name)[0]
@@ -1458,7 +1129,7 @@ def get_subreddit_posts(subreddit, limit=10):
         return None
 
 def main():
-    """Main function to process files from Dropbox"""
+    """Main function to process one video from Dropbox"""
     try:
         # Get initial Dropbox report
         initial_report = get_dropbox_report()
@@ -1478,224 +1149,42 @@ def main():
             send_telegram_notification("📭 No files found in Dropbox folder")
             return
         
-        # Step 1: Check subreddit count and determine files to process
-        subreddit_count = len(SUBREDDITS_TO_POST)
-        files_to_process = min(len(files), subreddit_count)
-        
-        logger.info(f"📊 Step 1: Found {subreddit_count} subreddits available")
-        logger.info(f"📊 Will process {files_to_process} files from Dropbox")
-        send_telegram_notification(f"📊 Step 1: Found {subreddit_count} subreddits, will process {files_to_process} files")
-        
-        # Select files to process (first N files based on subreddit count)
-        files_to_process_list = files[:files_to_process]
-        
-        # Step 2: Post selected files to main subreddit first
-        logger.info("🚀 Step 2: Posting selected files to main subreddit...")
-        send_telegram_notification("🚀 Step 2: Posting selected files to main subreddit...")
-        
-        main_subreddit_urls = []
-        for i, file in enumerate(files_to_process_list):
-            try:
-                logger.info(f"📝 Posting file {i+1}/{len(files_to_process_list)} to main subreddit: {file.name}")
+        # Process only the first file
+        file = random.choice(files)
+        try:
+            # Get temporary link
+            temp_link = get_dropbox_temporary_link(file.path_display)
+            if not temp_link:
+                return
+            
+            # Generate title from filename
+            title = generate_post_title(file.name)
+            logger.info(f"📝 Final title for Reddit: {title}")
+            
+            # Determine file type and upload
+            if file.name.lower().endswith(('.mp4', '.mov')):
+                url = upload_to_reddit(temp_link, title)
+            elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
+                url = upload_image_to_reddit(temp_link, title)
+            else:
+                logger.warning(f"⚠️ Unsupported file type: {file.name}")
+                return
+            
+            if url:
+                # Send notification
+                send_telegram_notification(f"✅ Successfully uploaded to Reddit: {url}")
                 
-                # Get temporary link
-                temp_link = get_dropbox_temporary_link(file.path_display)
-                if not temp_link:
-                    continue
-                
-                # Generate title from filename or OCR
-                title = generate_post_title(file.name)
-                logger.info(f"📝 Final title for main subreddit: {title}")
-                
-                # Determine file type and upload to main subreddit
-                if file.name.lower().endswith(('.mp4', '.mov')):
-                    # For videos, we need to download and process for OCR
-                    video_data = download_to_memory(temp_link)
-                    if not video_data:
-                        continue
-                    
-                    processed_video = validate_and_convert_video(video_data)
-                    if not processed_video:
-                        continue
-                    
-                    # Create temporary video file for OCR
-                    fd, temp_video = tempfile.mkstemp(suffix=".mp4")
-                    os.close(fd)
-                    
-                    with open(temp_video, 'wb') as f:
-                        f.write(processed_video.getvalue())
-                    
-                    # Generate title using OCR from video
-                    ocr_title = generate_title_from_ocr(temp_video, title)
-                    if ocr_title:
-                        title = ocr_title
-                        logger.info(f"📝 Using OCR title for main subreddit: {title}")
-                    
-                    # Clean up temporary video file
-                    os.remove(temp_video)
-                    
-                    url = upload_to_reddit(temp_link, title)
-                elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    url = upload_image_to_reddit(temp_link, title)
-                else:
-                    logger.warning(f"⚠️ Unsupported file type: {file.name}")
-                    continue
-                
-                if url:
-                    main_subreddit_urls.append(url)
-                    logger.info(f"✅ Posted to main subreddit: {url}")
-                    send_telegram_notification(f"✅ Posted to main subreddit: {url}")
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to post {file.name} to main subreddit: {e}")
-                continue
-        
-        # Step 3: Post individual files to different subreddits (only after main subreddit is done)
-        logger.info("🚀 Step 3: Posting individual files to different subreddits...")
-        send_telegram_notification("🚀 Step 3: Posting individual files to different subreddits...")
-        
-        posted_files = []
-        for i in range(files_to_process):
-            try:
-                file = files_to_process_list[i]
-                subreddit_name = SUBREDDITS_TO_POST[i]
-                
-                logger.info(f"📝 Posting file {i+1}/{files_to_process} to r/{subreddit_name}: {file.name}")
-                
-                # Get temporary link
-                temp_link = get_dropbox_temporary_link(file.path_display)
-                if not temp_link:
-                    continue
-                
-                # Generate title from filename or OCR
-                title = generate_post_title(file.name)
-                logger.info(f"📝 Final title for r/{subreddit_name}: {title}")
-                
-                # Initialize PRAW client
-                reddit = Reddit(
-                    client_id=REDDIT_CLIENT_ID,
-                    client_secret=REDDIT_CLIENT_SECRET,
-                    refresh_token=REDDIT_REFRESH_TOKEN,
-                    user_agent=REDDIT_USER_AGENT
-                )
-                
-                # Get subreddit
-                subreddit = reddit.subreddit(subreddit_name)
-                
-                # Determine file type and upload
-                if file.name.lower().endswith(('.mp4', '.mov')):
-                    # Handle video upload
-                    video_data = download_to_memory(temp_link)
-                    if not video_data:
-                        continue
-                    
-                    processed_video = validate_and_convert_video(video_data)
-                    if not processed_video:
-                        continue
-                    
-                    thumbnail_data = generate_thumbnail(processed_video)
-                    if not thumbnail_data:
-                        continue
-                    
-                    # Create temporary files
-                    fd, temp_video = tempfile.mkstemp(suffix=".mp4")
-                    os.close(fd)
-                    
-                    fd, temp_thumbnail = tempfile.mkstemp(suffix=".jpg")
-                    os.close(fd)
-                    
-                    with open(temp_video, 'wb') as f:
-                        f.write(processed_video.getvalue())
-                    
-                    with open(temp_thumbnail, 'wb') as f:
-                        f.write(thumbnail_data.getvalue())
-                    
-                    # Generate title using OCR from video
-                    ocr_title = generate_title_from_ocr(temp_video, title)
-                    if ocr_title:
-                        title = ocr_title
-                        logger.info(f"📝 Using OCR title for r/{subreddit_name}: {title}")
-                    
-                    # Submit video
-                    submission = subreddit.submit_video(
-                        title=title,
-                        video_path=temp_video,
-                        thumbnail_path=temp_thumbnail,
-                        without_websockets=True,
-                        resubmit=True,
-                        send_replies=True
-                    )
-                    
-                    # Clean up temporary files
-                    os.remove(temp_video)
-                    os.remove(temp_thumbnail)
-                    
-                elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                    # Handle image upload
-                    image_data = download_to_memory(temp_link)
-                    if not image_data:
-                        continue
-                    
-                    # Create temporary file
-                    fd, temp_image = tempfile.mkstemp(suffix=".jpg")
-                    os.close(fd)
-                    
-                    with open(temp_image, 'wb') as f:
-                        f.write(image_data.getvalue())
-                    
-                    # Submit image
-                    submission = subreddit.submit_image(
-                        title=title,
-                        image_path=temp_image,
-                        send_replies=True
-                    )
-                    
-                    # Clean up temporary file
-                    os.remove(temp_image)
-                else:
-                    logger.warning(f"⚠️ Unsupported file type: {file.name}")
-                    continue
-                
-                # Wait for processing
-                time.sleep(10)
-                
-                # Try to find the submission if not returned directly
-                if not submission:
-                    submission = find_submission(reddit, title)
-                    if not submission:
-                        logger.warning(f"⚠️ Could not find submission in r/{subreddit_name}")
-                        continue
-                
-                # Get post URL
-                post_url = f"https://reddit.com{submission.permalink}"
-                posted_files.append(file)
-                
-                logger.info(f"✅ Successfully posted to r/{subreddit_name}: {post_url}")
-                send_telegram_notification(f"✅ Posted to r/{subreddit_name}: {post_url}")
-                
-                # Sleep for 30 seconds before next post (except for the last one)
-                if i < files_to_process - 1:
-                    logger.info(f"⏳ Sleeping for 30 seconds before next post...")
-                    time.sleep(30)
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to post {file.name} to r/{subreddit_name}: {e}")
-                send_telegram_notification(f"❌ Failed to post {file.name} to r/{subreddit_name}: {e}")
-                continue
-        
-        # Step 4: Delete successfully posted files from Dropbox
-        logger.info("🚀 Step 4: Deleting posted files from Dropbox...")
-        send_telegram_notification("🚀 Step 4: Deleting posted files from Dropbox...")
-        
-        deleted_count = 0
-        for file in posted_files:
-            try:
-                dbx = get_dropbox_client()
-                dbx.files_delete_v2(file.path_display)
-                logger.info(f"🗑️ Deleted from Dropbox: {file.name}")
-                deleted_count += 1
-            except Exception as e:
-                logger.error(f"❌ Failed to delete from Dropbox: {file.name} — {e}")
+                # Delete from Dropbox
+                try:
+                    dbx = get_dropbox_client()
+                    dbx.files_delete_v2(file.path_display)
+                    logger.info(f"🗑️ Deleted from Dropbox: {file.name}")
+                except Exception as e:
+                    logger.error(f"❌ Failed to delete from Dropbox: {file.name} — {e}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to process {file.name}: {e}")
+            return
         
         # Get final Dropbox report
         final_report = get_dropbox_report()
@@ -1724,23 +1213,17 @@ def main():
                 summary += f"✅ Videos processed: {processed['videos']}\n"
                 summary += f"✅ Images processed: {processed['images']}\n"
                 summary += f"✅ Other files processed: {processed['others']}\n"
-                summary += f"✅ Files deleted from Dropbox: {deleted_count}\n"
-                summary += f"✅ Main subreddit posts: {len(main_subreddit_urls)}\n"
-                summary += f"✅ Individual subreddit posts: {len(posted_files)}"
                 send_telegram_notification(summary)
                 
                 logger.info("📊 Processing Summary:")
                 logger.info(f"✅ Total files processed: {processed['total']}")
                 logger.info(f"✅ Videos processed: {processed['videos']}")
                 logger.info(f"✅ Images processed: {processed['images']}")
-                logger.info(f"✅ Other files processed: {processed['others']}")
-                logger.info(f"✅ Files deleted from Dropbox: {deleted_count}")
-                logger.info(f"✅ Main subreddit posts: {len(main_subreddit_urls)}")
-                logger.info(f"✅ Individual subreddit posts: {len(posted_files)}\n")
+                logger.info(f"✅ Other files processed: {processed['others']}\n")
         
-        # Exit after processing all files
-        logger.info("✅ Script completed processing all files")
-        send_telegram_notification("✅ Script completed processing all files")
+        # Exit after processing one file
+        logger.info("✅ Script completed processing one file")
+        send_telegram_notification("✅ Script completed processing one file")
         return
     
     except Exception as e:
