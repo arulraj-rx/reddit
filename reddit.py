@@ -23,9 +23,160 @@ import re
 from pytz import timezone
 from datetime import datetime
 import random
+try:
+    import cv2
+    import pytesseract
+    from PIL import Image
+    import numpy as np
+    OCR_AVAILABLE = True
+except ImportError as e:
+    OCR_AVAILABLE = False
 
 IST = timezone('Asia/Kolkata')
 current_time = datetime.now(IST)
+
+def extract_text_from_video_frames(video_path, max_frames=5):
+    """Extract text from video frames using OCR"""
+    if not OCR_AVAILABLE:
+        logger.warning("⚠️ OCR libraries not available, skipping text extraction")
+        return None
+        
+    try:
+        logger.info(f"🔍 Extracting text from video frames: {video_path}")
+        
+        # Open video file
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.error("❌ Could not open video file")
+            return None
+        
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        duration = total_frames / fps if fps > 0 else 0
+        
+        logger.info(f"📊 Video info: {total_frames} frames, {fps:.2f} fps, {duration:.2f}s duration")
+        
+        # Calculate frame intervals to sample
+        if total_frames <= max_frames:
+            frame_indices = list(range(total_frames))
+        else:
+            # Sample frames evenly throughout the video
+            frame_indices = [int(i * total_frames / max_frames) for i in range(max_frames)]
+        
+        extracted_texts = []
+        
+        for i, frame_idx in enumerate(frame_indices):
+            try:
+                # Set frame position
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+                ret, frame = cap.read()
+                
+                if not ret:
+                    logger.warning(f"⚠️ Could not read frame {frame_idx}")
+                    continue
+                
+                # Convert BGR to RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                
+                # Convert to PIL Image
+                pil_image = Image.fromarray(frame_rgb)
+                
+                # Extract text using Tesseract
+                try:
+                    # Try different OCR configurations for better results
+                    text = pytesseract.image_to_string(pil_image, config='--psm 6')
+                    
+                    # Clean up the text
+                    text = text.strip()
+                    if text and len(text) > 3:  # Only keep meaningful text
+                        extracted_texts.append(text)
+                        logger.info(f"📝 Frame {i+1}: Found text: {text[:50]}...")
+                    
+                except Exception as e:
+                    logger.warning(f"⚠️ OCR failed on frame {i+1}: {e}")
+                    continue
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Error processing frame {i+1}: {e}")
+                continue
+        
+        cap.release()
+        
+        if not extracted_texts:
+            logger.warning("⚠️ No text extracted from video frames")
+            return None
+        
+        # Combine and clean all extracted text
+        combined_text = ' '.join(extracted_texts)
+        cleaned_text = clean_ocr_text(combined_text)
+        
+        if cleaned_text:
+            logger.info(f"✅ Extracted text: {cleaned_text[:100]}...")
+            return cleaned_text
+        else:
+            logger.warning("⚠️ No cleaned text extracted")
+            return None
+        
+    except Exception as e:
+        logger.error(f"❌ Error extracting text from video: {e}")
+        return None
+
+def clean_ocr_text(text):
+    """Clean and filter OCR extracted text"""
+    try:
+        if not text:
+            return None
+        
+        # Remove extra whitespace and newlines
+        text = re.sub(r'\s+', ' ', text.strip())
+        
+        # Remove common OCR artifacts
+        text = re.sub(r'[^\w\s.,!?\'"()-]', '', text)
+        
+        # Remove very short words (likely noise)
+        words = text.split()
+        filtered_words = [word for word in words if len(word) > 2]
+        
+        # Reconstruct text
+        cleaned_text = ' '.join(filtered_words)
+        
+        # Remove duplicate consecutive words
+        cleaned_text = re.sub(r'\b(\w+)(\s+\1\b)+', r'\1', cleaned_text)
+        
+        # Limit length
+        if len(cleaned_text) > 200:
+            cleaned_text = cleaned_text[:200].rsplit(' ', 1)[0] + '...'
+        
+        return cleaned_text if cleaned_text.strip() else None
+        
+    except Exception as e:
+        logger.error(f"❌ Error cleaning OCR text: {e}")
+        return None
+
+def generate_title_from_ocr(video_path, original_title):
+    """Generate title using OCR text from video frames"""
+    if not OCR_AVAILABLE:
+        logger.warning("⚠️ OCR libraries not available, using original title")
+        return original_title
+        
+    try:
+        # Try to extract text from video frames
+        ocr_text = extract_text_from_video_frames(video_path)
+        
+        if ocr_text and len(ocr_text) > 10:
+            # Use OCR text as title
+            title = ocr_text
+            logger.info(f"📝 Using OCR text as title: {title}")
+            return title
+        else:
+            # Fall back to original title generation
+            logger.info(f"📝 No OCR text found, using original title: {original_title}")
+            return original_title
+            
+    except Exception as e:
+        logger.error(f"❌ Error generating title from OCR: {e}")
+        return original_title
 
 # === LOGGING SETUP ===
 logging.basicConfig(
@@ -1243,10 +1394,20 @@ def clean_filename(filename):
         logger.error(f"❌ Failed to clean filename: {e}")
         return filename
 
-def generate_post_title(filename: str) -> str:
-    """Generate post title from filename"""
+def generate_post_title(filename: str, video_path: str = None) -> str:
+    """Generate post title from filename or OCR text from video"""
     try:
-        # Clean the filename first
+        # If it's a video and we have a path, try OCR first
+        if video_path and filename.lower().endswith(('.mp4', '.mov')):
+            try:
+                ocr_title = generate_title_from_ocr(video_path, None)
+                if ocr_title:
+                    logger.info(f"📝 Using OCR-generated title: {ocr_title}")
+                    return ocr_title
+            except Exception as e:
+                logger.warning(f"⚠️ OCR title generation failed: {e}")
+        
+        # Fall back to filename-based title
         clean_name = clean_filename(filename)
         # Remove file extension
         name_without_ext = os.path.splitext(clean_name)[0]
@@ -1342,12 +1503,37 @@ def main():
                 if not temp_link:
                     continue
                 
-                # Generate title from filename
+                # Generate title from filename or OCR
                 title = generate_post_title(file.name)
                 logger.info(f"📝 Final title for main subreddit: {title}")
                 
                 # Determine file type and upload to main subreddit
                 if file.name.lower().endswith(('.mp4', '.mov')):
+                    # For videos, we need to download and process for OCR
+                    video_data = download_to_memory(temp_link)
+                    if not video_data:
+                        continue
+                    
+                    processed_video = validate_and_convert_video(video_data)
+                    if not processed_video:
+                        continue
+                    
+                    # Create temporary video file for OCR
+                    fd, temp_video = tempfile.mkstemp(suffix=".mp4")
+                    os.close(fd)
+                    
+                    with open(temp_video, 'wb') as f:
+                        f.write(processed_video.getvalue())
+                    
+                    # Generate title using OCR from video
+                    ocr_title = generate_title_from_ocr(temp_video, title)
+                    if ocr_title:
+                        title = ocr_title
+                        logger.info(f"📝 Using OCR title for main subreddit: {title}")
+                    
+                    # Clean up temporary video file
+                    os.remove(temp_video)
+                    
                     url = upload_to_reddit(temp_link, title)
                 elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
                     url = upload_image_to_reddit(temp_link, title)
@@ -1374,14 +1560,14 @@ def main():
                 file = files_to_process_list[i]
                 subreddit_name = SUBREDDITS_TO_POST[i]
                 
-                logger.info(f"📝 Posting file {i+1}/{files_to_post} to r/{subreddit_name}: {file.name}")
+                logger.info(f"📝 Posting file {i+1}/{files_to_process} to r/{subreddit_name}: {file.name}")
                 
                 # Get temporary link
                 temp_link = get_dropbox_temporary_link(file.path_display)
                 if not temp_link:
                     continue
                 
-                # Generate title from filename
+                # Generate title from filename or OCR
                 title = generate_post_title(file.name)
                 logger.info(f"📝 Final title for r/{subreddit_name}: {title}")
                 
@@ -1423,6 +1609,12 @@ def main():
                     
                     with open(temp_thumbnail, 'wb') as f:
                         f.write(thumbnail_data.getvalue())
+                    
+                    # Generate title using OCR from video
+                    ocr_title = generate_title_from_ocr(temp_video, title)
+                    if ocr_title:
+                        title = ocr_title
+                        logger.info(f"📝 Using OCR title for r/{subreddit_name}: {title}")
                     
                     # Submit video
                     submission = subreddit.submit_video(
@@ -1482,7 +1674,7 @@ def main():
                 send_telegram_notification(f"✅ Posted to r/{subreddit_name}: {post_url}")
                 
                 # Sleep for 30 seconds before next post (except for the last one)
-                if i < files_to_post - 1:
+                if i < files_to_process - 1:
                     logger.info(f"⏳ Sleeping for 30 seconds before next post...")
                     time.sleep(30)
                 
@@ -1491,9 +1683,9 @@ def main():
                 send_telegram_notification(f"❌ Failed to post {file.name} to r/{subreddit_name}: {e}")
                 continue
         
-        # Step 3: Delete successfully posted files from Dropbox
-        logger.info("🚀 Step 3: Deleting posted files from Dropbox...")
-        send_telegram_notification("🚀 Step 3: Deleting posted files from Dropbox...")
+        # Step 4: Delete successfully posted files from Dropbox
+        logger.info("🚀 Step 4: Deleting posted files from Dropbox...")
+        send_telegram_notification("🚀 Step 4: Deleting posted files from Dropbox...")
         
         deleted_count = 0
         for file in posted_files:
