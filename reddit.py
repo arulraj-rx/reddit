@@ -1,4 +1,4 @@
-# reddit.py
+# test_dropbox_to_reddit.py
 
 import os
 import logging
@@ -50,14 +50,9 @@ REDDIT_REFRESH_TOKEN = os.getenv('REDDIT_REFRESH_TOKEN')
 REDDIT_USER_AGENT = os.getenv('REDDIT_USER_AGENT', 'script v1.0 by u/arulraj_r')
 SUBREDDIT_NAME = os.getenv('SUBREDDIT_NAME', 'inkwisp')
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-
-# Target subreddits for crossposting
-TARGET_SUBREDDITS = [
+# List of subreddits to post to
+SUBREDDITS_TO_POST = [
     'memes',
-    'me_irl', 
-    'meirl',
     'ContagiousLaughter',
     'MemeVideos',
     'ExplainTheJoke',
@@ -67,8 +62,11 @@ TARGET_SUBREDDITS = [
     'funny',
     'Wellthatsucks',
     'maybemaybemaybe'
-    
 ]
+
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+
 
 # Validate required credentials
 required_credentials = {
@@ -1019,87 +1017,160 @@ def upload_image_to_reddit(image_url, title):
             except Exception as e:
                 logger.warning(f"Failed to clean up temporary image: {e}")
 
-def crosspost_to_subreddits(reddit, original_submission, target_subs, custom_title=None):
-    """Crosspost to multiple subreddits"""
+def upload_to_multiple_subreddits(video_url, title, is_video=True):
+    """Upload content to multiple subreddits with sleep between each post"""
+    temp_video = None
+    temp_image = None
+    thumbnail_data = None
+    posted_urls = []
+    
     try:
-        logger.info("🔄 Starting crossposting process...")
+        # Initialize PRAW client
+        reddit = Reddit(
+            client_id=REDDIT_CLIENT_ID,
+            client_secret=REDDIT_CLIENT_SECRET,
+            refresh_token=REDDIT_REFRESH_TOKEN,
+            user_agent=REDDIT_USER_AGENT
+        )
         
-        # Get the submission object if we have a URL
-        if isinstance(original_submission, str):
-            # Extract submission ID from URL
-            if '/comments/' in original_submission:
-                submission_id = original_submission.split('/comments/')[1].split('/')[0]
-            else:
-                # Try to get from user's recent submissions
-                for post in reddit.user.me().submissions.new(limit=5):
-                    if post.url == original_submission or f"https://reddit.com{post.permalink}" == original_submission:
-                        submission_id = post.id
-                        break
-                else:
-                    raise Exception("Could not find submission ID from URL")
+        # Download content once
+        if is_video:
+            video_data = download_to_memory(video_url)
+            if not video_data:
+                raise Exception("Failed to download video")
+            
+            # Validate and convert video if needed
+            processed_video = validate_and_convert_video(video_data)
+            if not processed_video:
+                raise Exception("Video validation/conversion failed")
+            
+            # Generate thumbnail in memory
+            thumbnail_data = generate_thumbnail(processed_video)
+            if not thumbnail_data:
+                raise Exception("Failed to generate thumbnail")
+            
+            # Create temporary files for PRAW upload
+            fd, temp_video = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd)
+            
+            fd, temp_thumbnail = tempfile.mkstemp(suffix=".jpg")
+            os.close(fd)
+            
+            # Write data to temporary files
+            with open(temp_video, 'wb') as f:
+                f.write(processed_video.getvalue())
+            
+            with open(temp_thumbnail, 'wb') as f:
+                f.write(thumbnail_data.getvalue())
         else:
-            submission_id = original_submission.id
+            # Handle image
+            image_data = download_to_memory(video_url)
+            if not image_data:
+                raise Exception("Failed to download image")
+            
+            # Handle both memory and disk downloads
+            if isinstance(image_data, io.BytesIO):
+                # Create temporary file for PRAW
+                fd, temp_image = tempfile.mkstemp(suffix=".jpg")
+                os.close(fd)
+                with open(temp_image, 'wb') as f:
+                    f.write(image_data.getvalue())
+            else:
+                # Already downloaded to disk
+                temp_image = image_data
         
-        # Get the submission object
-        submission = reddit.submission(id=submission_id)
-        
-        # Use custom title or original title
-        title = custom_title or submission.title
-        
-        # Add x-post prefix if not already present
-        if not title.lower().startswith('x-post') and not title.lower().startswith('crosspost'):
-            title = f"x-post: {title}"
-        
-        successful_crossposts = []
-        failed_crossposts = []
-        
-        for sub in target_subs:
+        # Post to each subreddit with sleep between posts
+        for i, subreddit_name in enumerate(SUBREDDITS_TO_POST):
             try:
-                logger.info(f"📤 Crossposting to r/{sub}...")
+                logger.info(f"📝 Posting to r/{subreddit_name} ({i+1}/{len(SUBREDDITS_TO_POST)})")
                 
-                # Crosspost to target subreddit
-                crosspost = submission.crosspost(subreddit=sub, title=title)
+                # Get subreddit
+                subreddit = reddit.subreddit(subreddit_name)
                 
-                # Wait a bit between crossposts to avoid rate limiting
-                time.sleep(6)
+                # Submit content
+                if is_video:
+                    submission = subreddit.submit_video(
+                        title=title,
+                        video_path=temp_video,
+                        thumbnail_path=temp_thumbnail,
+                        without_websockets=True,
+                        resubmit=True,
+                        send_replies=True
+                    )
+                else:
+                    submission = subreddit.submit_image(
+                        title=title,
+                        image_path=temp_image,
+                        send_replies=True
+                    )
                 
-                successful_crossposts.append(sub)
-                logger.info(f"✅ Successfully crossposted to r/{sub}")
+                # Wait for initial processing
+                time.sleep(10)
+                
+                # Try to find the submission if not returned directly
+                if not submission:
+                    submission = find_submission(reddit, title)
+                    if not submission:
+                        logger.warning(f"⚠️ Could not find submission in r/{subreddit_name}")
+                        continue
+                
+                # For videos, wait for processing
+                if is_video:
+                    max_retries = 6
+                    retry_delay = 10
+                    
+                    for attempt in range(max_retries):
+                        try:
+                            # Refresh submission data
+                            submission = reddit.submission(id=submission.id)
+                            
+                            # Check if video is ready
+                            if hasattr(submission, 'media') and submission.media and 'reddit_video' in submission.media:
+                                break
+                            
+                            logger.info(f"⏳ Waiting for video processing in r/{subreddit_name} (attempt {attempt + 1}/{max_retries})...")
+                            time.sleep(retry_delay)
+                            
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error checking video status in r/{subreddit_name}: {e}")
+                            time.sleep(retry_delay)
+                
+                # Add to posted URLs
+                post_url = f"https://reddit.com{submission.permalink}"
+                posted_urls.append(post_url)
+                logger.info(f"✅ Successfully posted to r/{subreddit_name}: {post_url}")
+                
+                # Send notification for each successful post
+                send_telegram_notification(f"✅ Posted to r/{subreddit_name}: {post_url}")
+                
+                # Sleep for 30 seconds before next post (except for the last one)
+                if i < len(SUBREDDITS_TO_POST) - 1:
+                    logger.info(f"⏳ Sleeping for 30 seconds before next post...")
+                    time.sleep(30)
                 
             except Exception as e:
-                error_msg = str(e)
-                logger.error(f"❌ Failed to crosspost to r/{sub}: {error_msg}")
-                failed_crossposts.append((sub, error_msg))
-                
-                # Continue with other subreddits even if one fails
+                logger.error(f"❌ Failed to post to r/{subreddit_name}: {e}")
+                send_telegram_notification(f"❌ Failed to post to r/{subreddit_name}: {e}")
                 continue
         
-        # Log summary
-        logger.info(f"📊 Crossposting Summary:")
-        logger.info(f"✅ Successful: {len(successful_crossposts)} subreddits")
-        logger.info(f"❌ Failed: {len(failed_crossposts)} subreddits")
-        
-        if successful_crossposts:
-            logger.info(f"✅ Crossposted to: {', '.join(successful_crossposts)}")
-        
-        if failed_crossposts:
-            logger.info(f"❌ Failed subreddits:")
-            for sub, error in failed_crossposts:
-                logger.info(f"   - r/{sub}: {error}")
-        
-        return {
-            'successful': successful_crossposts,
-            'failed': failed_crossposts,
-            'total_attempted': len(target_subs)
-        }
+        # Return all posted URLs
+        return posted_urls
         
     except Exception as e:
-        logger.error(f"❌ Crossposting process failed: {e}")
-        return {
-            'successful': [],
-            'failed': [(sub, str(e)) for sub in target_subs],
-            'total_attempted': len(target_subs)
-        }
+        logger.error(f"❌ Multiple subreddit upload failed: {e}")
+        raise
+        
+    finally:
+        # Clean up temporary files
+        try:
+            if temp_video and os.path.exists(temp_video):
+                os.remove(temp_video)
+            if temp_thumbnail and os.path.exists(temp_thumbnail):
+                os.remove(temp_thumbnail)
+            if temp_image and os.path.exists(temp_image):
+                os.remove(temp_image)
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary files: {e}")
 
 def get_dropbox_report():
     """Get report of files in Dropbox folder"""
@@ -1259,57 +1330,21 @@ def main():
             title = generate_post_title(file.name)
             logger.info(f"📝 Final title for Reddit: {title}")
             
-            # Determine file type and upload
+            # Determine file type and upload to multiple subreddits
             if file.name.lower().endswith(('.mp4', '.mov')):
-                url = upload_to_reddit(temp_link, title)
+                urls = upload_to_multiple_subreddits(temp_link, title, is_video=True)
             elif file.name.lower().endswith(('.jpg', '.jpeg', '.png', '.gif')):
-                url = upload_image_to_reddit(temp_link, title)
+                urls = upload_to_multiple_subreddits(temp_link, title, is_video=False)
             else:
                 logger.warning(f"⚠️ Unsupported file type: {file.name}")
                 return
             
-            if url:
-                # Send notification
-                send_telegram_notification(f"✅ Successfully uploaded to Reddit: {url}")
-                
-                # Initialize Reddit client for crossposting
-                try:
-                    reddit = Reddit(
-                        client_id=REDDIT_CLIENT_ID,
-                        client_secret=REDDIT_CLIENT_SECRET,
-                        refresh_token=REDDIT_REFRESH_TOKEN,
-                        user_agent=REDDIT_USER_AGENT
-                    )
-                    
-                    # Crosspost to target subreddits
-                    logger.info("🔄 Starting crossposting to motivation subreddits...")
-                    crosspost_result = crosspost_to_subreddits(
-                        reddit=reddit,
-                        original_submission=url,
-                        target_subs=TARGET_SUBREDDITS,
-                        custom_title=title
-                    )
-                    
-                    # Send crossposting summary to Telegram
-                    if crosspost_result['successful']:
-                        crosspost_message = f"🔄 Crossposting Summary:\n"
-                        crosspost_message += f"✅ Successful: {len(crosspost_result['successful'])} subreddits\n"
-                        crosspost_message += f"✅ Crossposted to: {', '.join(crosspost_result['successful'])}\n"
-                        
-                        if crosspost_result['failed']:
-                            crosspost_message += f"❌ Failed: {len(crosspost_result['failed'])} subreddits\n"
-                            for sub, error in crosspost_result['failed'][:3]:  # Show first 3 failures
-                                crosspost_message += f"   - r/{sub}: {error[:50]}...\n"
-                        
-                        send_telegram_notification(crosspost_message)
-                        logger.info("✅ Crossposting completed")
-                    else:
-                        send_telegram_notification("❌ Crossposting failed for all subreddits")
-                        logger.error("❌ Crossposting failed")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Crossposting process failed: {e}")
-                    send_telegram_notification(f"❌ Crossposting failed: {str(e)[:100]}...")
+            if urls:
+                # Send summary notification
+                summary = f"✅ Successfully uploaded to {len(urls)} subreddits:\n"
+                for i, url in enumerate(urls, 1):
+                    summary += f"{i}. {url}\n"
+                send_telegram_notification(summary)
                 
                 # Delete from Dropbox
                 try:
