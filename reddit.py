@@ -1034,9 +1034,9 @@ def crosspost_to_subreddits(reddit, original_submission, target_subs, custom_tit
         # Use custom title or original title
         title = custom_title or submission.title
         
-        # Add x-post prefix if not already present
-        if not title.lower().startswith('x-post') and not title.lower().startswith('crosspost'):
-            title = f"x-post: {title}"
+        # Add arul prefix if not already present
+        if not title.lower().startswith('inkwisps') and not title.lower().startswith('crosspost'):
+            title = f"inkwisps: {title}"
         
         successful_crossposts = []
         failed_crossposts = []
