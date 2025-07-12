@@ -58,7 +58,8 @@ TARGET_SUBREDDITS = [
 'motivation',
 'inspirationalquotes',
 'MotivationalQuotes',
-'MotivationalThoughts'
+'MotivationalThoughts',
+'QuotePics'
     
 ]
 
