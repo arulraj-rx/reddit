@@ -2,12 +2,14 @@ name: Reddit - InkWisps
 
 on:
   schedule:
-    - cron: '30 18 * * *'  # 01:00 AM IST (previous day UTC)
-    - cron: '30 22 * * *'  # 05:00 AM IST (previous day UTC)
-    - cron: '15 3 * * *'   # 09:45 AM IST
-    - cron: '30 7 * * *'   # 02:00 PM IST
-    - cron: '30 12 * * *'  # 07:00 PM IST
-    - cron: '45 15 * * *'  # 10:15 PM IST
+    - cron: '0 4 * * *'    # 09:30 AM IST  
+    - cron: '45 6 * * *'   # 11:15 AM IST  
+    - cron: '15 8 * * *'   # 01:45 PM IST  
+    - cron: '0 10 * * *'   # 03:30 PM IST  
+    - cron: '30 13 * * *'  # 06:00 PM IST  
+    - cron: '15 16 * * *'  # 09:45 PM IST  
+    - cron: '0 17 * * *'   # 10:30 PM IST  
+    - cron: '30 19 * * *'  # 01:00 AM IST (next day)
 
   workflow_dispatch:
 
